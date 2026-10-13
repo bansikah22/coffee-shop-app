@@ -48,46 +48,45 @@ Use the built-in continuous integration in GitLab.
 
 When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
 
-## Suggestions for a good README
+# Coffee Shop GitOps POC
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Coffee Shop is a React frontend and Spring Boot API backed by PostgreSQL. It is the application source repository for the GitOps proof of concept; environment manifests and promotion history will live in a separate Helm repository.
 
-## Name
-Choose a self-explaining name for your project.
+## Architecture
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+The browser receives the React application from Nginx. Nginx routes `/api/` to the Spring Boot API, so deployed users use one origin and do not need a browser-facing backend URL. The API owns the PostgreSQL connection.
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```text
+Browser -> Nginx frontend -> /api -> Spring Boot API -> PostgreSQL
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+`CORS_ALLOWED_ORIGINS` is an explicit API allowlist for cases where a browser accesses the API from another origin. The Compose path is same-origin, so CORS is not needed for normal application requests.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## Local Stack
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+Prerequisites: Docker Compose, Java 25, Maven, Node.js 26, and npm.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```sh
+cd backend
+./mvnw test
+./mvnw package -DskipTests
+cd ..
+docker compose up --build --detach
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+Open `http://localhost:8088`. The API is available at `http://localhost:18080`; health is at `/actuator/health`. Stop the stack with `docker compose down`; add `--volumes` to reset local database data.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+The backend Dockerfile intentionally packages the previously built jar. This prevents an image build from repeating tests and dependency resolution. CI runs Maven tests and package before building the API runtime image.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+## CI/CD
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+The GitLab pipeline performs these stages:
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+1. `frontend:verify`: locked dependency installation, lint, and production build.
+2. `backend:test`: Maven test suite.
+3. `backend:package`: package a Spring Boot jar artifact.
+4. Component-specific container verification jobs build only changed images for non-default branches.
+5. Component-specific publish jobs publish changed images on the default branch with the full commit SHA tag.
 
-## License
-For open source projects, say how it is licensed.
-
+GitLab runners must support Docker-in-Docker with privileged mode for the container jobs. The project registry is accessed only by the default-branch publish job using GitLab-provided registry credentials. Deployment promotion is intentionally not in this repository yet: the next phase will update immutable image digests in the separate Helm GitOps repository through a merge request.
 ## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.

@@ -1,0 +1,140 @@
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+stages:
+  - verify
+  - package
+  - containerize
+
+variables:
+  MAVEN_OPTS: '-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository'
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ''
+  DOCKER_DRIVER: overlay2
+  BACKEND_IMAGE: '$CI_REGISTRY_IMAGE/backend'
+  FRONTEND_IMAGE: '$CI_REGISTRY_IMAGE/frontend'
+
+default:
+  interruptible: true
+
+frontend:verify:
+  stage: verify
+  image: node:26-alpine
+  cache:
+    key:
+      files:
+        - frontend/package-lock.json
+    paths:
+      - frontend/.npm/
+  script:
+    - cd frontend
+    - npm ci --cache .npm --prefer-offline
+    - npm run lint
+    - npm run build
+  rules:
+    - changes:
+        - frontend/**/*
+        - .gitlab-ci.yml
+
+backend:test:
+  stage: verify
+  image: maven:3.9.12-eclipse-temurin-25
+  cache:
+    key:
+      files:
+        - backend/pom.xml
+    paths:
+      - .m2/repository/
+  script:
+    - cd backend
+    - mvn --batch-mode --no-transfer-progress test
+  rules:
+    - changes:
+        - backend/**/*
+        - .gitlab-ci.yml
+
+backend:package:
+  stage: package
+  image: maven:3.9.12-eclipse-temurin-25
+  needs:
+    - backend:test
+  cache:
+    key:
+      files:
+        - backend/pom.xml
+    paths:
+      - .m2/repository/
+  script:
+    - cd backend
+    - mvn --batch-mode --no-transfer-progress package -DskipTests
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - backend/target/coffee-shop-api-*.jar
+  rules:
+    - changes:
+        - backend/**/*
+        - .gitlab-ci.yml
+
+.container-build:
+  stage: containerize
+  image: docker:29.7.0-cli
+  services:
+    - name: docker:29.7.0-dind
+      alias: docker
+  before_script:
+    - docker info
+
+backend:container:verify:
+  extends: .container-build
+  needs:
+    - job: backend:package
+      artifacts: true
+  script:
+    - docker build --tag "$BACKEND_IMAGE:$CI_COMMIT_SHA" backend
+  rules:
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+      changes:
+        - backend/**/*
+        - .gitlab-ci.yml
+
+backend:container:publish:
+  extends: .container-build
+  needs:
+    - job: backend:package
+      artifacts: true
+  script:
+    - docker build --tag "$BACKEND_IMAGE:$CI_COMMIT_SHA" backend
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+    - docker push "$BACKEND_IMAGE:$CI_COMMIT_SHA"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - backend/**/*
+        - .gitlab-ci.yml
+
+frontend:container:verify:
+  extends: .container-build
+  script:
+    - docker build --tag "$FRONTEND_IMAGE:$CI_COMMIT_SHA" frontend
+  rules:
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+      changes:
+        - frontend/**/*
+        - .gitlab-ci.yml
+
+frontend:container:publish:
+  extends: .container-build
+  script:
+    - docker build --tag "$FRONTEND_IMAGE:$CI_COMMIT_SHA" frontend
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+    - docker push "$FRONTEND_IMAGE:$CI_COMMIT_SHA"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - frontend/**/*
+        - .gitlab-ci.yml
