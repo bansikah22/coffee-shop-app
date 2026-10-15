@@ -5,6 +5,7 @@ import io.swagger.v3.oas.models.info.Info;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+/** Configures the API description shown in OpenAPI documentation. Introduced in Git on 2026-10-13. */
 @Configuration
 class OpenApiConfiguration {
 

@@ -50,7 +50,7 @@ When you're ready to make this README your own, just edit this file and use the 
 
 # Coffee Shop GitOps POC
 
-Coffee Shop is a React frontend and Spring Boot API backed by PostgreSQL. It is the application source repository for the GitOps proof of concept; environment manifests and promotion history will live in a separate Helm repository.
+Coffee Shop is a React frontend and Spring Boot API backed by PostgreSQL. Customers can browse coffee, sign in, place orders, and see their own order history. Administrators can manage the catalog and review all orders. It is the application source repository for the GitOps proof of concept; environment manifests and promotion history live in a separate Helm repository.
 
 ## Architecture
 
@@ -61,6 +61,40 @@ Browser -> Nginx frontend -> /api -> Spring Boot API -> PostgreSQL
 ```
 
 `CORS_ALLOWED_ORIGINS` is an explicit API allowlist for cases where a browser accesses the API from another origin. The Compose path is same-origin, so CORS is not needed for normal application requests.
+
+## Source Layout
+
+The backend groups similar classes by technical role: `domain` contains persisted business models, `repository` contains persistence interfaces, `service` contains application rules, and `web` contains HTTP controllers and request/response contracts. Each package has a `package-info.java` description, and each type documents its responsibility. Cross-cutting Spring configuration lives in `configuration`.
+
+The frontend uses feature ownership: `features/catalog` owns catalog types, data operations, and catalog UI; `features/orders` owns order submission and history; `features/auth` owns account state and authentication screens; `shared/api` contains the CSRF-aware same-origin request client; `shared/navigation` contains responsive navigation and the site footer. React Router provides `/`, `/login`, `/register`, `/orders`, and `/admin` routes. Lucide React supplies the shopping-bag order icon.
+
+The original `public/ember-bean-mark.svg` is reused as the browser favicon and visible site mark.
+
+
+Authentication is local username/password with Spring Security sessions and CSRF protection for this POC. The login page presents Keycloak as the preferred identity provider and local email/password as the current working option. Keycloak remains disabled until realm/client configuration and server-side OIDC integration are supplied. Successful local login routes administrators to `/admin` and customers to the coffee board. Authorization is enforced by the API, not only by hiding controls: coffee writes and the all-orders endpoint require `ADMIN`; creating and listing personal orders requires a signed-in account. Customer accounts can self-register. The local account model can later be replaced by Keycloak/OIDC while keeping role checks at the API boundary.
+
+```text
+backend/src/main/java/.../coffeeshop/
+	domain/       Coffee, CoffeeOrder
+	repository/   CoffeeRepository, CoffeeOrderRepository
+	service/      CoffeeCatalogService, OrderService
+	web/          catalog and order controllers/contracts
+	configuration/
+
+frontend/src/
+	features/catalog/
+	features/orders/
+	features/auth/
+	shared/api/
+	shared/navigation/
+	App.tsx
+```
+
+Backend class documentation describes each type's responsibility. Introduction dates are based on the first Git commit containing the class, not filesystem timestamps; the current backend types were introduced in the initial commit on 2026-10-13. Frontend components and hooks are documented by their feature and file names, while their addition dates remain available through Git history.
+
+## Engineering Guidance
+
+This project uses the relevant, tailored practices from [engineering-skills](https://github.com/bansikah22/engineering-skills): focused behavior-preserving refactors, feature-first ownership, minimal abstractions, and validation with the narrowest relevant checks. The shared guidance is a reference, not a substitute for this repository's architecture and constraints.
 
 ## Local Stack
 
@@ -75,6 +109,17 @@ docker compose up --build --detach
 ```
 
 Open `http://localhost:8088`. The API is available at `http://localhost:18080`; health is at `/actuator/health`. Stop the stack with `docker compose down`; add `--volumes` to reset local database data.
+
+The local Compose stack activates the `dev` Spring profile and seeds disposable demo accounts:
+
+| Role | Email | Password |
+| --- | --- | --- |
+| Admin | `admin@example.com` | `CoffeeAdmin123!` |
+| Customer | `customer@example.com` | `CoffeeCustomer123!` |
+
+These known credentials are only for local development. Do not activate the `dev` profile in a shared or production environment. Production admin provisioning uses `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`; keep them in deployment secret storage and use a unique strong password. Customer passwords are BCrypt-hashed; registration requires at least 12 characters.
+
+The current coffee board maps the bundled assets in `frontend/src/assets` to Americano, Cappuccino, Flat White, and Seasonal Mocha. Coffee cards prefer an API-provided `imageUrl` when present, then fall back to these static images. Additional products without an image keep the image-free card layout. Admin-managed uploads can later replace the static map by persisting image references from object storage.
 
 The backend Dockerfile intentionally packages the previously built jar. This prevents an image build from repeating tests and dependency resolution. CI runs Maven tests and package before building the API runtime image.
 

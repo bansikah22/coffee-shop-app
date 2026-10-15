@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+/** Applies the configured cross-origin policy to API routes. Introduced in Git on 2026-10-13. */
 @Configuration
 public class WebConfiguration implements WebMvcConfigurer {
 
@@ -21,7 +22,8 @@ public class WebConfiguration implements WebMvcConfigurer {
 		registry.addMapping("/api/**")
 				.allowedOrigins(allowedOrigins.toArray(String[]::new))
 				.allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-				.allowedHeaders("Content-Type")
+				.allowedHeaders("Content-Type", "X-CSRF-TOKEN")
+				.allowCredentials(true)
 				.maxAge(3600);
 	}
 }
