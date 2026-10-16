@@ -39,6 +39,20 @@ export function useAuth(setError: (message: string) => void) {
   }
 
   async function logout() {
+    if (account?.authProvider === 'keycloak') {
+      const csrf = await request<{ headerName: string; token: string }>('/auth/csrf')
+      const form = document.createElement('form')
+      form.method = 'POST'
+      form.action = '/api/v1/auth/oidc-logout'
+      const token = document.createElement('input')
+      token.type = 'hidden'
+      token.name = '_csrf'
+      token.value = csrf.token
+      form.append(token)
+      document.body.append(form)
+      form.submit()
+      return
+    }
     await request<void>('/auth/logout', { method: 'POST' })
     setAccount(null)
   }

@@ -1,0 +1,184 @@
+{
+  "realm": "coffee-shop",
+  "displayName": "Ember & Bean",
+  "loginTheme": "ember-bean",
+  "enabled": true,
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "verifyEmail": true,
+  "resetPasswordAllowed": true,
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "no-reply@ember-bean.local",
+    "fromDisplayName": "Ember & Bean",
+    "ssl": "false",
+    "starttls": "false",
+    "auth": "false"
+  },
+  "clients": [
+    {
+      "clientId": "coffee-shop",
+      "name": "Coffee Shop local app",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_CLIENT_SECRET}",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8088/"
+      },
+      "redirectUris": [
+        "http://localhost:8088/api/login/oauth2/code/keycloak"
+      ],
+      "webOrigins": [
+        "http://localhost:8088"
+      ],
+      "defaultClientScopes": [
+        "coffee-shop-identity",
+        "coffee-shop-roles"
+      ]
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "coffee-shop-identity",
+      "description": "Verified email identity claims for the application",
+      "protocol": "openid-connect",
+      "attributes": {
+        "display.on.consent.screen": "false",
+        "include.in.token.scope": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "email verified",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "emailVerified",
+            "claim.name": "email_verified",
+            "jsonType.label": "boolean",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "coffee-shop-roles",
+      "description": "Only Coffee Shop client roles for the signed ID token claim",
+      "protocol": "openid-connect",
+      "attributes": {
+        "display.on.consent.screen": "false",
+        "include.in.token.scope": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "coffee-shop roles ID token claim",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "coffee-shop",
+            "usermodel.clientRoleMapping.rolePrefix": "",
+            "claim.name": "coffee_shop_roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "false",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "clientScopeMappings": {
+    "coffee-shop": [
+      {
+        "clientScope": "coffee-shop-roles",
+        "roles": [
+          "ADMIN",
+          "CUSTOMER"
+        ]
+      }
+    ]
+  },
+  "roles": {
+    "client": {
+      "coffee-shop": [
+        {
+          "name": "ADMIN",
+          "clientRole": true
+        },
+        {
+          "name": "CUSTOMER",
+          "clientRole": true
+        }
+      ]
+    }
+  },
+  "users": [
+    {
+      "username": "sso-admin@example.com",
+      "email": "sso-admin@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Local",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "LocalSsoAdmin123!",
+          "temporary": false
+        }
+      ],
+      "clientRoles": {
+        "coffee-shop": [
+          "ADMIN"
+        ]
+      }
+    },
+    {
+      "username": "sso-customer@example.com",
+      "email": "sso-customer@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Local",
+      "lastName": "Customer",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "LocalSsoCustomer123!",
+          "temporary": false
+        }
+      ],
+      "clientRoles": {
+        "coffee-shop": [
+          "CUSTOMER"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+@startuml customer-journey
+title A2. Sign-in, Ordering and Access Control
+autonumber 1 "<b>00</b>"
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor "Customer / Admin" as user #E0F2FE
+participant "Browser\nReact" as ui #E0F2FE
+participant "Nginx\n/api proxy" as proxy #E0F2FE
+participant "Spring Security\nSession + CSRF + roles" as security #DCFCE7
+participant "Controllers / Services" as api #DCFCE7
+database "PostgreSQL\nvia JPA repositories" as db #FEF3C7
+
+== Sign in: one form for all roles ==
+user -> ui : Enter email and password on /login
+ui -> proxy : GET /api/v1/auth/csrf
+proxy -> security : Retrieve session-bound CSRF token
+security --> ui : Token through Nginx; session cookie
+ui -> proxy : POST /api/v1/auth/login\nCredentials + cookie + CSRF header
+proxy -> security : Validate CSRF; dispatch login
+security -> api : Authenticate local credentials
+api -> db : Look up account; verify BCrypt hash in backend
+db --> api : Account with role
+api --> ui : Save authenticated session; return account\n(response via Nginx)
+alt ADMIN account
+  ui --> user : Navigate to /admin
+else CUSTOMER account
+  ui --> user : Navigate to coffee board /
+end
+
+== Place an order: backend owns price and identity ==
+user -> ui : Select coffee and quantity
+ui -> proxy : GET CSRF token; then POST /api/v1/orders\nBody: coffeeId and quantity, not price or customerId
+proxy -> security : Forward session cookie and CSRF header
+security -> api : Allow authenticated request\nResolve customer from authenticated principal
+api -> db : Read available coffee and current unit price
+db --> api : Coffee data
+api -> api : Calculate total = stored unit price x quantity
+api -> db : Save account ownership, coffee name/price snapshot,\nquantity, total and creation timestamp
+db --> api : Saved order
+api --> ui : 201 Created with authoritative total
+ui --> user : Display confirmation
+
+== Read orders / enforce role boundaries ==
+ui -> proxy : GET /api/v1/orders (customer)\nor GET /api/v1/admin/orders (admin workspace)
+proxy -> security : Authorize session and route
+alt Allowed
+  security -> api : Personal list: filter by principal's account ID\nAdmin list: require ADMIN role
+  api -> db : Query authorized order scope
+  db --> api : Matching orders
+  api --> ui : Order history
+else Missing session / insufficient role
+  security --> ui : 401 / 403; no protected data returned
+end
+
+note over security, api #FEE2E2
+  Catalog POST / PUT / DELETE also require ADMIN.
+  Browser route guards are UX only; the API enforces authorization.
+end note
+legend bottom
+  Blue: user interface and delivery | Green: trusted backend | Amber: data
+  Numbered messages show the normal local-account flow.
+  Keycloak is not integrated yet. Proxy return hops are condensed for readability.
+endlegend
+@enduml

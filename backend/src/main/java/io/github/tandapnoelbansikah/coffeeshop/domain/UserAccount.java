@@ -34,6 +34,12 @@ public class UserAccount implements UserDetails {
 	@Column(nullable = false, length = 20)
 	private AccountRole role;
 
+	@Column(name = "oidc_issuer", length = 512)
+	private String oidcIssuer;
+
+	@Column(name = "oidc_subject", length = 255)
+	private String oidcSubject;
+
 	protected UserAccount() {
 	}
 
@@ -45,6 +51,32 @@ public class UserAccount implements UserDetails {
 
 	public Long getId() {
 		return id;
+	}
+
+	protected UserAccount(UserAccount account) {
+		this.id = account.id;
+		this.email = account.email;
+		this.passwordHash = account.passwordHash;
+		this.role = account.role;
+		this.oidcIssuer = account.oidcIssuer;
+		this.oidcSubject = account.oidcSubject;
+	}
+
+	public void bindOidcIdentity(String issuer, String subject) {
+		this.oidcIssuer = issuer;
+		this.oidcSubject = subject;
+	}
+
+	public boolean isLocalAccount() {
+		return oidcIssuer == null;
+	}
+
+	public void updateOidcProfile(String email, AccountRole role) {
+		if (isLocalAccount()) {
+			throw new IllegalStateException("Local accounts cannot be updated through OIDC");
+		}
+		this.email = email;
+		this.role = role;
 	}
 
 	public String getEmail() {

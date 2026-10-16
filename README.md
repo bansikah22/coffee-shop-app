@@ -54,6 +54,13 @@ Coffee Shop is a React frontend and Spring Boot API backed by PostgreSQL. Custom
 
 ## Architecture
 
+See the [application flow diagram](docs/architecture/application-flow.svg) and its [editable PlantUML source](docs/architecture/application-flow.puml). It shows the current local runtime, authentication and authorization boundaries, catalog/order processing, and future integrations.
+
+Read the diagrams in this order:
+
+1. **A1 - Application overview:** follow steps 1-6 across the browser, proxy, API and database. Blue identifies frontend delivery, green backend logic, and amber persisted data.
+2. **A2 - Customer journey:** [numbered sequence diagram](docs/architecture/customer-journey.svg) ([PlantUML source](docs/architecture/customer-journey.puml)) covering sign-in, role-based redirects, price calculation, order persistence, and access control. Return proxy hops are condensed for readability.
+
 The browser receives the React application from Nginx. Nginx routes `/api/` to the Spring Boot API, so deployed users use one origin and do not need a browser-facing backend URL. The API owns the PostgreSQL connection.
 
 ```text
@@ -71,15 +78,19 @@ The frontend uses feature ownership: `features/catalog` owns catalog types, data
 The original `public/ember-bean-mark.svg` is reused as the browser favicon and visible site mark.
 
 
-Authentication is local username/password with Spring Security sessions and CSRF protection for this POC. The login page presents Keycloak as the preferred identity provider and local email/password as the current working option. Keycloak remains disabled until realm/client configuration and server-side OIDC integration are supplied. Successful local login routes administrators to `/admin` and customers to the coffee board. Authorization is enforced by the API, not only by hiding controls: coffee writes and the all-orders endpoint require `ADMIN`; creating and listing personal orders requires a signed-in account. Customer accounts can self-register. The local account model can later be replaced by Keycloak/OIDC while keeping role checks at the API boundary.
+Authentication uses Spring Security sessions and CSRF protection. Local email/password login remains available; with the optional SSO Compose profile, Keycloak provides verified self-registration, sign-in, and password reset, while the backend provisions the app's customer account on first verified sign-in. Order confirmations are sent after placement, and administrators can mark orders ready to trigger a second customer email. Successful authentication routes administrators to `/admin` and customers to the coffee board. Authorization is enforced by the API, not only by hiding controls: coffee writes and the all-orders endpoint require `ADMIN`; creating and listing personal orders requires a signed-in account. See [docs/keycloak.md](docs/keycloak.md) for local SSO setup and the production boundary.
 
 ```text
 backend/src/main/java/.../coffeeshop/
-	domain/       Coffee, CoffeeOrder
-	repository/   CoffeeRepository, CoffeeOrderRepository
-	service/      CoffeeCatalogService, OrderService
-	web/          catalog and order controllers/contracts
-	configuration/
+	domain/                shared account, catalog, and order models
+	repository/            persistence interfaces
+	configuration/auth/    security, Keycloak, and account initialization
+	service/auth/          local and OIDC account use cases
+	service/catalog/       coffee catalog rules
+	service/orders/        placement, fulfillment, events, and customer emails
+	web/auth/              authentication endpoints/contracts
+	web/catalog/           catalog endpoints/contracts
+	web/orders/            customer and administrator order endpoints/contracts
 
 frontend/src/
 	features/catalog/
@@ -120,6 +131,8 @@ The local Compose stack activates the `dev` Spring profile and seeds disposable 
 These known credentials are only for local development. Do not activate the `dev` profile in a shared or production environment. Production admin provisioning uses `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`; keep them in deployment secret storage and use a unique strong password. Customer passwords are BCrypt-hashed; registration requires at least 12 characters.
 
 The current coffee board maps the bundled assets in `frontend/src/assets` to Americano, Cappuccino, Flat White, and Seasonal Mocha. Coffee cards prefer an API-provided `imageUrl` when present, then fall back to these static images. Additional products without an image keep the image-free card layout. Admin-managed uploads can later replace the static map by persisting image references from object storage.
+
+For the optional local Keycloak SSO provider, realm fixture, and production boundary notes, see [docs/keycloak.md](docs/keycloak.md). Keycloak is not started by the default Compose stack.
 
 The backend Dockerfile intentionally packages the previously built jar. This prevents an image build from repeating tests and dependency resolution. CI runs Maven tests and package before building the API runtime image.
 

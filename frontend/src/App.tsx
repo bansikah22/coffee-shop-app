@@ -32,6 +32,10 @@ function App() {
     <main>
       <SiteNavigation key={location.pathname} account={auth.account} isLoading={auth.isLoading} orderCount={order.orders.length} onLogout={auth.logout} />
       {error && <div className="notice error" role="alert">{error}<button type="button" onClick={() => setError('')} aria-label="Dismiss error">x</button></div>}
+      {order.successMessage && <div className="order-success-toast" role="status" aria-live="polite">
+        <div><strong>Order confirmed</strong><span>{order.successMessage}</span></div>
+        <button type="button" onClick={order.dismissSuccessMessage} aria-label="Dismiss order confirmation">x</button>
+      </div>}
       <p className="service-status" aria-live="polite"><span></span>{status}</p>
       <Routes>
         <Route path="/" element={
@@ -53,8 +57,14 @@ function App() {
             {auth.account && <QuickOrderPanel
               coffee={order.selectedCoffee}
               quantity={order.quantity}
+              fulfillmentType={order.fulfillmentType}
+              customerPhone={order.customerPhone}
+              deliveryAddress={order.deliveryAddress}
               isSubmitting={order.isSubmitting}
               onQuantityChange={order.setQuantity}
+              onFulfillmentTypeChange={order.setFulfillmentType}
+              onCustomerPhoneChange={order.setCustomerPhone}
+              onDeliveryAddressChange={order.setDeliveryAddress}
               onPlaceOrder={() => void order.placeOrder()}
               onCancel={() => order.setSelectedCoffeeId(null)}
             />}
@@ -82,7 +92,10 @@ function App() {
               : auth.account.role !== 'ADMIN' ? <section className="access-denied"><p className="eyebrow">403 · Restricted</p><h1>Admin access only.</h1><p>Your account can browse coffee and view your own orders.</p><Link className="browse-link" to="/">Back to coffee</Link></section>
                 : <>
                     <section className="route-heading"><p className="eyebrow">Administrator workspace</p><h1>Store overview.</h1></section>
-                    <OrderHistory orders={order.orders} isAdmin onRefresh={() => void order.loadOrders()} />
+                    <OrderHistory orders={order.orders} isAdmin onRefresh={() => void order.loadOrders()}
+                      onMarkReady={(orderId) => void order.markOrderReady(orderId)}
+                      onMarkCompleted={(orderId) => void order.markOrderCompleted(orderId)}
+                      markingOrderReady={order.markingOrderReady} />
                     <CatalogManager
                       coffees={catalog.coffees}
                       form={catalog.form}

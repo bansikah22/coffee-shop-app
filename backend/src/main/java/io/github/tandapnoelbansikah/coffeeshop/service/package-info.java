@@ -1,2 +1,2 @@
-/** Application use cases and business rules for catalog and order operations. */
+/** Feature-oriented application services for authentication, catalog, and orders. */
 package io.github.tandapnoelbansikah.coffeeshop.service;

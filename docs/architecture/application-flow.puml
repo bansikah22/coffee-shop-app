@@ -1,0 +1,69 @@
+@startuml application-flow
+!pragma layout smetana
+title A1. Application Overview - Read Steps 1 to 6
+left to right direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam defaultFontName SansSerif
+skinparam packageStyle rectangle
+
+actor "Visitor / Customer" as customer
+actor "Administrator" as admin
+
+node "Frontend container" #E0F2FE {
+  component "Nginx\nStatic assets + SPA route fallback\n/api/* reverse proxy" as nginx
+}
+
+node "Browser" #E0F2FE {
+  component "React application\nCoffee board: /\nSign in: /login\nRegistration: /register\nPersonal orders: /orders\nAdmin workspace: /admin" as react
+  artifact "Bundled coffee photos\nBrand mark and favicon" as assets
+}
+
+node "Spring Boot backend container :18080" #DCFCE7 {
+  component "Spring Security\nSession authentication + CSRF\nADMIN checks on catalog writes\nand /api/v1/admin/orders" as security
+  component "HTTP controllers\n/api/v1/auth/*\n/api/v1/coffees\n/api/v1/orders\n/api/v1/admin/orders" as controllers
+  component "Application services\nAccounts | Catalog | Orders\nPrice calculation and ownership" as services
+  component "Spring Data JPA\nRepositories" as repositories
+  component "Flyway\nVersioned schema migrations" as flyway
+}
+
+database "PostgreSQL\nCatalog | Accounts | Orders" as postgres #FEF3C7
+
+customer --> react : 1. Browse, sign in, order
+admin --> react : 1. Same login; role selects workspace
+nginx --> react : 2. Deliver application
+assets --> react : Bundled images
+react --> nginx : 3. /api requests + session / CSRF
+nginx --> security : 4. Proxy to backend:18080
+security --> controllers : 5. Authenticate and authorize
+controllers --> services : Dispatch validated request
+services --> repositories : Apply business rules
+repositories --> postgres : 6. Read / persist data
+flyway ..> postgres : Startup only: migrate schema
+
+note bottom of security
+  Product reads are public; ordering requires authentication.
+  Customers only receive their own order history.
+  Admins can edit the catalog and list all orders.
+  Hiding frontend controls is not the security boundary.
+end note
+
+note bottom of postgres
+  Current runtime: local Docker Compose.
+  Browser URL: http://localhost:8088
+  PostgreSQL data persists in a named volume.
+  Known demo accounts are seeded only by the dev profile.
+  Sessions currently live in backend memory, not a shared store.
+end note
+
+legend bottom
+  |= Color |= Responsibility |
+  |<#E0F2FE> Blue | Browser and frontend delivery |
+  |<#DCFCE7> Green | API security and business logic |
+  |<#FEF3C7> Amber | Persistent data |
+  Responses return along the request path.
+  See A2 for numbered sign-in and order interactions.
+  Keycloak, image uploads and cluster deployment remain planned.
+endlegend
+@enduml
