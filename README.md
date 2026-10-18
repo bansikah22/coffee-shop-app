@@ -138,6 +138,12 @@ The backend Dockerfile intentionally packages the previously built jar. This pre
 
 ## CI/CD
 
+An optional, manually triggered GitLab job syncs the protected default branch to GitHub. See [GitHub sync setup](docs/github-sync.md) for token configuration, operation, and safety boundaries.
+
+GitHub also runs [Verify](.github/workflows/verify.yml) on pushes and pull requests to `main`, or manually through the Actions tab. It checks frontend lint/build and backend compilation/tests/packaging without publishing or deploying.
+
+[Dependabot](.github/dependabot.yml) checks Maven, npm, Dockerfiles, and GitHub Actions weekly. Apply proposed updates through GitLab before syncing back to GitHub; see the [sync guide](docs/github-sync.md) for the mirror-safe update process.
+
 The GitLab pipeline performs these stages:
 
 1. `frontend:verify`: locked dependency installation, lint, and production build.
