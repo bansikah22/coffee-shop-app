@@ -18,6 +18,7 @@ variables:
   DOCKER_DRIVER: overlay2
   BACKEND_IMAGE: '$CI_REGISTRY_IMAGE/backend'
   FRONTEND_IMAGE: '$CI_REGISTRY_IMAGE/frontend'
+  PAYMENTS_IMAGE: '$CI_REGISTRY_IMAGE/payments'
 
 default:
   interruptible: true
@@ -58,6 +59,29 @@ payments:verify:
       - .m2/repository/
   script:
     - mvn --batch-mode --no-transfer-progress -f payment-service/pom.xml verify
+  rules:
+    - changes:
+        - payment-service/**/*
+        - docker-compose.yml
+        - .gitlab-ci.yml
+
+payments:package:
+  stage: package
+  image: maven:3.9.12-eclipse-temurin-25
+  needs:
+    - payments:verify
+  cache:
+    key:
+      files:
+        - payment-service/pom.xml
+    paths:
+      - .m2/repository/
+  script:
+    - mvn --batch-mode --no-transfer-progress -f payment-service/pom.xml package -DskipTests
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - payment-service/target/payment-service-*.jar
   rules:
     - changes:
         - payment-service/**/*
@@ -158,6 +182,36 @@ backend:container:publish:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
       changes:
         - backend/**/*
+        - .gitlab-ci.yml
+
+payments:container:verify:
+  extends: .container-build
+  needs:
+    - job: payments:package
+      artifacts: true
+  script:
+    - docker build --tag "$PAYMENTS_IMAGE:$CI_COMMIT_SHA" payment-service
+  rules:
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+      changes:
+        - payment-service/**/*
+        - docker-compose.yml
+        - .gitlab-ci.yml
+
+payments:container:publish:
+  extends: .container-build
+  needs:
+    - job: payments:package
+      artifacts: true
+  script:
+    - docker build --tag "$PAYMENTS_IMAGE:$CI_COMMIT_SHA" payment-service
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+    - docker push "$PAYMENTS_IMAGE:$CI_COMMIT_SHA"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - payment-service/**/*
+        - docker-compose.yml
         - .gitlab-ci.yml
 
 frontend:container:verify:
