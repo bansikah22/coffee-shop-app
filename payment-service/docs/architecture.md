@@ -1,16 +1,34 @@
 # Payment Service Architecture
 
+## Architecture Diagrams
+
+Start with the [application and component diagrams](../../.github/modernize/assessment/engines/facts/architecture-diagram.md). They show the security boundaries and separate data ownership. The sequence below describes the implemented local checkout flow; production deployment remains a separate concern.
+
 ## Status and Scope
 
-This is a design artifact and directory skeleton, not a running service. The first increment is limited to collecting one-time customer payments for coffee orders using Cameroon mobile money. Card processing, stored wallets, subscriptions, split payments, and payouts are out of scope.
+The service is implemented with Spring Boot 4.1.1, Java 25, Stripe Java SDK 33.0.0 (API `2026-05-27.dahlia`), JDBC/Flyway, RabbitMQ, and a separately run demo consumer. The root Compose file owns all local services. Coffee checkout is integrated: the backend creates a pending order, requests hosted Checkout, and waits for a verified payment result before enabling fulfillment. See [communication.md](communication.md) for working contracts, local-only simplifications, and remaining production work.
+
+The POC demonstrates one-time USD payments through Stripe sandbox hosted Checkout using Java and Spring Boot. Local sandbox access is verified; no real funds are collected or settled. Live processing, MTN Mobile Money, Orange Money, subscriptions, saved cards, refunds, payouts, and currency conversion are outside this increment.
+
+This supersedes the earlier Fapshi/XAF direction. Sandbox access does not establish live merchant eligibility or USD settlement support in Cameroon. Production requires separate verification of merchant country, business onboarding, collection currencies, and settlement support.
 
 ## Service Ownership
 
-The payment service owns payment attempts, provider transaction references, normalized payment state, verified provider notifications, and an outbox. The existing order service remains the owner of orders, customer authorization, catalog prices, and fulfillment state. Each service gets its own database; neither service reads or writes the other's tables.
+The payment service owns payment attempts, Checkout Session and PaymentIntent references, normalized payment state, verified provider events, and an outbox. Use the official Stripe Java SDK behind the provider adapter; application/domain contracts must not expose SDK-specific objects.
 
-Only the payment service holds provider credentials. The browser never calls the provider API directly. The order service will be the trusted caller for checkout creation after it has authenticated the customer, checked order ownership, and calculated the amount.
+The order service remains responsible for customer authorization, catalog prices, order totals, and fulfillment. Each service owns its own database; neither reads or writes the other's tables. The order backend calls Payments through the authenticated checkout API and consumes results through its own queue.
 
-## Proposed Flow
+The browser calls Orders through the existing session/CSRF boundary. Only Payments holds Stripe secret credentials. Internal checkout creation requires an authenticated order-service workload, not a forwarded browser session. Keycloak client-credentials tokens are checked for signature, issuer, audience `payment-service`, expiry, and exact authorized party `azp=payment-service`; network isolation alone is not authentication.
+
+## Money Contract
+
+- Preserve USD pricing and include an explicit currency in order/payment contracts rather than inferring it from a dollar symbol.
+- Convert the server-calculated decimal total to exact integer USD cents at the payment boundary: $3.00 becomes `amountMinor=300`, `currency=USD`. The adapter maps currency to Stripe's required representation.
+- Use exact decimal arithmetic. Reject fractional cents, overflow, unsupported currencies, and amounts below the provider's applicable minimum; do not silently round or calculate charges using binary floating point.
+- Persist an immutable amount/currency snapshot per attempt and include it in result events. The browser cannot supply authoritative amounts or arbitrary provider price identifiers.
+- Pricing, charge, and settlement currencies are distinct. This POC demonstrates sandbox USD pricing/charges only, with no real settlement or exchange-rate policy.
+
+## Integrated Flow
 
 ```mermaid
 sequenceDiagram
@@ -20,73 +38,89 @@ sequenceDiagram
     participant ODB as Orders database
     participant Payment as Payment service
     participant PDB as Payments database
-    participant Fapshi
+    participant Stripe as Stripe sandbox Checkout
     participant MQ as RabbitMQ
 
-    Customer->>UI: Choose Mobile Money or Orange Money and request payment
-    UI->>Orders: Create order
-    Orders->>ODB: Calculate total and save AWAITING_PAYMENT
-    Orders->>Payment: Authenticated create-payment request
-    Payment->>PDB: Persist attempt and idempotency key
-    Payment->>Fapshi: Create hosted payment link
-    Fapshi-->>Payment: Return link and provider transaction ID
+    Customer->>UI: Request checkout for USD order
+    UI->>Orders: Create order using session and CSRF
+    Orders->>ODB: Save USD total and AWAITING_PAYMENT
+    Orders->>Payment: Authenticated create-checkout request and idempotency key
+    Payment->>PDB: Persist attempt and expected USD cents
+    Payment->>Stripe: Create sandbox session with stable idempotency key
+    Stripe-->>Payment: Return session ID and hosted checkout URL
+    Payment->>PDB: Persist session reference
     Payment-->>Orders: Return payment ID and checkout URL
     Orders-->>UI: Return order ID and checkout URL
-    UI->>Fapshi: Redirect customer to hosted checkout
-    Fapshi-->>Customer: Ask customer to authorize wallet payment
-    Fapshi->>Payment: HTTPS webhook with configured x-wh-secret
-    Payment->>PDB: Persist notification durably
-    Payment->>Fapshi: Verify current transaction status
+    UI->>Stripe: Redirect customer to hosted test-card checkout
+    Customer->>Stripe: Enter test card and approve
+    Stripe->>Payment: Webhook with Stripe-Signature
+    Payment->>Payment: Verify raw-body signature and sandbox context
+    Payment->>PDB: Persist event once, then acknowledge
+    Payment->>Stripe: Retrieve session and payment status for verification
     Payment->>PDB: Commit normalized result and outbox record
     Payment->>MQ: Publish payment-result event from outbox
     MQ-->>Orders: Deliver result at least once
     Orders->>ODB: Apply result idempotently
-    Fapshi-->>UI: Redirect customer to order status page
+    Stripe-->>UI: Redirect customer to order status page
     UI->>Orders: Read authoritative order status
 ```
 
-The hosted-checkout method-selection behavior must be confirmed in Fapshi's sandbox. Direct-pay is a fallback only if the hosted page cannot offer both methods; it has different lifecycle and retry risks.
+The redirect and webhook may arrive in either order. Display payment pending until Orders has applied a verified result. Never mark paid based on a return URL.
 
 ## State and Consistency
 
-- The order begins in `AWAITING_PAYMENT`; preparation must not begin yet.
-- The payment service tracks a normalized attempt lifecycle such as `PENDING`, `SUCCEEDED`, `FAILED`, and `EXPIRED`.
-- A provider notification is persisted before returning success to the provider. A background handler verifies its transaction through the provider API before recording a final result.
-- The payment-result event is written to an outbox in the same database transaction as the payment-state update. RabbitMQ delivery is at least once, so the order consumer deduplicates by event ID and makes transitions idempotent.
-- A reconciliation worker checks unresolved attempts to recover notifications that were lost. It must respect Fapshi's per-transaction status-query rate limit and use backoff.
-- The browser redirect is only a navigation aid. It never marks an order paid.
+- Orders begin in `AWAITING_PAYMENT`; the backend transitions them to `PAID` only after validating a payment-result event. Preparation and the order-confirmation email wait for that verified transition.
+- RabbitMQ and the isolated demo consumer are included alongside the backend-owned payment-result queue used by coffee checkout.
+- Payment attempt states are proposed as `PENDING`, `SUCCEEDED`, `FAILED`, and `EXPIRED`, separate from fulfillment. A declined card can be retried within an open session, so a failed card attempt is not necessarily terminal payment failure.
+- Canceling checkout or closing the browser is not proof of payment cancellation/failure. Reuse an open session or explicitly expire it and verify the outcome before creating a replacement attempt.
+- Deduplicate initiation requests using an internal idempotency key and a matching order/amount/currency snapshot; reject key reuse with a changed request. Pass a stable attempt-specific key to Stripe. On timeout, reconcile/retry the same attempt instead of creating another potential charge.
+- Persist intent before the external call, without holding a database transaction open across HTTP requests. Recover a crash between session creation and local persistence using the stored attempt and stable provider idempotency key.
+- Verify webhook signatures first, then persist events with a unique provider event ID before acknowledging. Return a retryable error if durable receipt fails. Process asynchronously and handle duplicate/out-of-order delivery without regressing `SUCCEEDED`.
+- For initial test cards, checkout completion is accepted only after verified paid status, expected amount/currency, and references match. Delayed payment methods are disabled; enabling them later requires asynchronous success/failure handling.
+- Commit the payment transition and outbox event atomically; publish with retries. Consumers deduplicate by event ID and validate the expected payment attempt and USD snapshot before changing an order.
+- Reconcile unresolved sessions with bounded backoff and rate-limit handling. Define checkout expiration and late-success handling before linking fulfillment; do not silently discard a late payment or fulfill twice.
 
 ## Security
 
-- Expose no general payment-management endpoint to browsers. The future checkout-creation API is internal and accepts requests only from the authenticated order-service workload.
-- The order service authenticates and authorizes the customer before creating an order. It supplies the order ID and server-calculated total; the browser cannot choose the amount or another customer's order ID.
-- Keep Fapshi `apiuser` and `apikey` credentials in the payment service's secret store, separate for sandbox and production. Do not commit them, put them in frontend configuration, or log request headers.
-- Publish the webhook only over HTTPS through a controlled ingress. Configure a dedicated webhook secret, compare it safely, enforce request-size and rate limits, and do not treat the shared-secret header alone as proof that the payment succeeded.
-- Validate provider transaction ID, external order reference, amount, currency, payment method, and current provider-side status before finalizing a payment.
-- Never collect wallet PINs or OTPs in this application. Do not store card data. Minimize and restrict access to payer phone numbers and provider payloads; redact them from logs.
-- Separate database credentials and least-privilege access by service. Audit payment state changes and administrator refund actions if refunds are added later.
+- Use sandbox credentials and test cards only. Reject live credentials in sandbox configuration and reject provider objects/events with `livemode=true`; key-prefix checks alone are insufficient.
+- Keep Stripe secret keys and webhook signing secrets in secret storage or ignored local configuration, never source, frontend bundles, images, or logs. Use least-privilege credentials where supported and separate environments.
+- Verify `Stripe-Signature` with the official SDK, endpoint-specific signing secret, timestamp tolerance, and exact raw request bytes before processing. Invalid or stale signatures must not change payment state.
+- Exempt only the dedicated webhook route from browser CSRF/session requirements; authenticate it using signature verification. Keep internal payment APIs authenticated and authorized.
+- Use HTTPS for a deployed sandbox webhook. For local development, use Stripe CLI forwarding with its own signing secret, distinct from the deployed endpoint secret.
+- Validate provider account/context, session/payment reference, paid status, order/attempt reference, exact amount, and USD currency against persisted expectations. Quarantine unexpected values instead of marking success.
+- Use server-owned success/cancel destinations and provider-created hosted checkout URLs, not arbitrary caller URLs. Do not allow callers to select provider API base URLs.
+- Card numbers, CVCs, and payment authentication stay on Stripe-hosted Checkout; our services never collect or log them. Hosted checkout reduces exposure but does not establish production PCI compliance by itself.
+- Enforce request-size limits, bounded timeouts, and rate limits that accommodate provider retries. Redact personal data, credentials, and sensitive payloads. Define retention and audit access for payment records.
+- Use separate database credentials and least-privilege access per service. Customer ownership checks remain in Orders; the browser cannot choose another customer's order or charge amount.
 
-## Fapshi-Specific Constraints To Verify
+## Standalone Demonstration
 
-Fapshi's current documentation describes MTN Mobile Money and Orange Money collections in Cameroon, a hosted `/initiate-pay` link with an XAF integer amount (minimum 100 XAF), separate sandbox/live credentials, and a webhook secret sent in `x-wh-secret`.
+The standalone payment CLI remains available for exercising synthetic USD payments, webhook verification, the outbox, and demo consumer without creating a coffee order. In the integrated flow, the coffee backend calculates the order total and passes its order reference and amount to Payments; the browser never supplies an authoritative charge amount.
 
-The webhook documentation says it sends one notification per event and does not retry when the receiver is unavailable. Therefore the design requires durable receipt plus status reconciliation; do not assume provider webhook retries. The status endpoint is rate-limited to six requests per minute per transaction, so reconciliation must be bounded and backed off. The `/direct-pay` flow does not expire and is disabled by default in live mode, which makes automatic retries unsafe until the prior attempt is known to be final.
 
-Before production, confirm merchant activation, fee schedule, settlement timing, operational support, webhook source/IP guidance, and the exact wallet choices exposed by hosted checkout.
+## Planned Verification
+
+1. Successful sandbox payment produces one verified success and outbox event with the expected USD cents.
+2. Declined test cards remain unpaid and can be retried without duplicate fulfillment.
+3. Browser cancellation, closure, or a forged success URL never marks paid; verified expiration becomes `EXPIRED` only if unpaid.
+4. Invalid/stale signatures, live-mode events, or mismatched amount/currency/reference never mark paid.
+5. Duplicate/out-of-order webhooks, initiation timeouts, database outages, and broker outages recover without duplicate charges or lost results.
+6. Future Orders integration gates preparation/email on verified success and handles multiple paid attempts or late payments through explicit reconciliation.
 
 ## Decisions Still Open
 
-1. Confirm XAF as the catalog/order currency. The current coffee app formats prices as dollars, and its current totals cannot be sent unchanged to an XAF-only provider. Do not add an implicit exchange-rate conversion.
-2. Verify that hosted checkout exposes both MTN Mobile Money and Orange Money in the Cameroon sandbox and live account.
-3. Confirm the provider account and production onboarding requirements before storing live credentials.
-4. Confirm RabbitMQ as the payment-result transport. It is the proposed first broker; the service still must remain correct under duplicate and delayed events.
-5. Define payment expiry and retry rules, especially if direct-pay is required.
+1. Confirm legitimate Stripe sandbox account access. Do not assume live merchant eligibility in Cameroon.
+2. Select and pin Java, Spring Boot, Stripe Java SDK, and Stripe API versions when introducing the build; no dependency is installed yet.
+3. Define internal endpoint/event schemas, service-token audience and authorized-party policy, session expiration, retry policy, and late-payment handling.
+4. Confirm the standalone database, local webhook-forwarding setup, and later RabbitMQ/outbox deployment.
+5. Review production onboarding, real USD settlement, refunds/disputes, and mobile-money support separately; they are not implied POC capabilities.
 
 ## Provider Documentation
 
-- [Fapshi product overview](https://docs.fapshi.com/)
-- [Hosted payment link](https://docs.fapshi.com/en/api-reference/endpoint/initiate-pay)
-- [Direct pay](https://docs.fapshi.com/en/api-reference/endpoint/direct-pay)
-- [Webhook integration](https://docs.fapshi.com/en/api-reference/endpoint/webhook)
-- [Environment and sandbox](https://docs.fapshi.com/en/api-reference/preliminary-knowledge/environment)
-- [Payment status and rate limit](https://docs.fapshi.com/en/api-reference/endpoint/payment-status)
+- [Stripe-hosted Checkout](https://docs.stripe.com/payments/checkout)
+- [Official Stripe Java SDK](https://github.com/stripe/stripe-java)
+- [Stripe testing](https://docs.stripe.com/testing)
+- [Webhooks](https://docs.stripe.com/webhooks)
+- [Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment)
+- [Idempotent API requests](https://docs.stripe.com/api/idempotent_requests)
+- [Merchant country availability](https://stripe.com/global)

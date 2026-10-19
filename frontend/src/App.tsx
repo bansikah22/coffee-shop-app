@@ -84,7 +84,8 @@ function App() {
         <Route path="/orders" element={
           auth.isLoading ? <p className="route-loading">Checking your account...</p>
             : !auth.account ? <Navigate to="/login" replace />
-              : <OrderHistory orders={order.orders} isAdmin={false} onRefresh={() => void order.loadOrders()} />
+                : <OrderHistory orders={order.orders} isAdmin={false} onRefresh={() => void order.loadOrders()}
+                  onPayOrder={(orderId) => void order.payOrder(orderId)} payingOrderId={order.payingOrderId} />
         } />
         <Route path="/admin" element={
           auth.isLoading ? <p className="route-loading">Checking your account...</p>

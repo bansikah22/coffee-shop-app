@@ -21,12 +21,14 @@ public class OrderService {
 	private final CoffeeCatalogService coffeeCatalogService;
 	private final CoffeeOrderRepository coffeeOrderRepository;
 	private final ApplicationEventPublisher events;
+	private final PaymentResultProcessor paymentResults;
 
 	public OrderService(CoffeeCatalogService coffeeCatalogService, CoffeeOrderRepository coffeeOrderRepository,
-			ApplicationEventPublisher events) {
+			ApplicationEventPublisher events, PaymentResultProcessor paymentResults) {
 		this.coffeeCatalogService = coffeeCatalogService;
 		this.coffeeOrderRepository = coffeeOrderRepository;
 		this.events = events;
+		this.paymentResults = paymentResults;
 	}
 
 	@Transactional
@@ -35,8 +37,32 @@ public class OrderService {
 		Coffee coffee = coffeeCatalogService.findAvailableCoffee(coffeeId);
 		CoffeeOrder order = coffeeOrderRepository.save(new CoffeeOrder(coffee.getId(), coffee.getName(), quantity,
 				coffee.getPrice(), customer.getId(), customer.getEmail(), fulfillmentType, customerPhone, deliveryAddress));
-		events.publishEvent(OrderPlacedEvent.from(order));
 		return order;
+	}
+
+	@Transactional
+	public CoffeeOrder attachPaymentAttempt(Long orderId, Long customerId, String attemptId) {
+		CoffeeOrder order = coffeeOrderRepository.findById(orderId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+		if (!order.getCustomerId().equals(customerId)) {
+			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found");
+		}
+		order.attachPaymentAttempt(attemptId);
+		return order;
+	}
+
+	@Transactional(readOnly = true)
+	public CoffeeOrder findCustomerOrder(Long orderId, Long customerId) {
+		CoffeeOrder order = coffeeOrderRepository.findById(orderId)
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+		if (!order.getCustomerId().equals(customerId)) {
+			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found");
+		}
+		return order;
+	}
+
+	public void applyPaymentResult(PaymentResultEvent event) {
+		paymentResults.apply(event);
 	}
 
 	@Transactional(readOnly = true)

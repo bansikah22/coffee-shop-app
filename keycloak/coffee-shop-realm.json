@@ -44,9 +44,48 @@
         "coffee-shop-identity",
         "coffee-shop-roles"
       ]
+    },
+    {
+      "clientId": "payment-service",
+      "name": "Coffee Shop order service to payment service",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${PAYMENT_CLIENT_SECRET}",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": ["payments-workload"],
+      "redirectUris": [],
+      "webOrigins": []
     }
   ],
   "clientScopes": [
+    {
+      "name": "payments-workload",
+      "description": "Service identity scope and audience for coffee orders calling payments",
+      "protocol": "openid-connect",
+      "attributes": {
+        "display.on.consent.screen": "false",
+        "include.in.token.scope": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "Payments audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "payment-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
     {
       "name": "coffee-shop-identity",
       "description": "Verified email identity claims for the application",
@@ -118,24 +157,15 @@
     "coffee-shop": [
       {
         "clientScope": "coffee-shop-roles",
-        "roles": [
-          "ADMIN",
-          "CUSTOMER"
-        ]
+        "roles": ["ADMIN", "CUSTOMER"]
       }
     ]
   },
   "roles": {
     "client": {
       "coffee-shop": [
-        {
-          "name": "ADMIN",
-          "clientRole": true
-        },
-        {
-          "name": "CUSTOMER",
-          "clientRole": true
-        }
+        {"name": "ADMIN", "clientRole": true},
+        {"name": "CUSTOMER", "clientRole": true}
       ]
     }
   },
@@ -147,18 +177,8 @@
       "emailVerified": true,
       "firstName": "Local",
       "lastName": "Admin",
-      "credentials": [
-        {
-          "type": "password",
-          "value": "LocalSsoAdmin123!",
-          "temporary": false
-        }
-      ],
-      "clientRoles": {
-        "coffee-shop": [
-          "ADMIN"
-        ]
-      }
+      "credentials": [{"type": "password", "value": "LocalSsoAdmin123!", "temporary": false}],
+      "clientRoles": {"coffee-shop": ["ADMIN"]}
     },
     {
       "username": "sso-customer@example.com",
@@ -167,18 +187,8 @@
       "emailVerified": true,
       "firstName": "Local",
       "lastName": "Customer",
-      "credentials": [
-        {
-          "type": "password",
-          "value": "LocalSsoCustomer123!",
-          "temporary": false
-        }
-      ],
-      "clientRoles": {
-        "coffee-shop": [
-          "CUSTOMER"
-        ]
-      }
+      "credentials": [{"type": "password", "value": "LocalSsoCustomer123!", "temporary": false}],
+      "clientRoles": {"coffee-shop": ["CUSTOMER"]}
     }
   ]
 }

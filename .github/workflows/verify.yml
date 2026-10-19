@@ -15,6 +15,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  payments:
+    name: Payments and RabbitMQ integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      payments-db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: payments
+          POSTGRES_USER: payments
+          POSTGRES_PASSWORD: disposable-ci-payment-password
+        ports: ['15433:5432']
+        options: >-
+          --health-cmd "pg_isready -U payments -d payments"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      demo-db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: demo_orders
+          POSTGRES_USER: demo_orders
+          POSTGRES_PASSWORD: disposable-ci-demo-password
+        ports: ['15434:5432']
+        options: >-
+          --health-cmd "pg_isready -U demo_orders -d demo_orders"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      rabbitmq:
+        image: rabbitmq:4.2-management
+        env:
+          RABBITMQ_DEFAULT_USER: payment_demo
+          RABBITMQ_DEFAULT_PASS: disposable-ci-rabbit-password
+        ports: ['15673:5672']
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PAYMENT_INFRA_TEST: 'true'
+      PAYMENT_IT_DB_PASSWORD: disposable-ci-payment-password
+      PAYMENT_IT_DEMO_PASSWORD: disposable-ci-demo-password
+      PAYMENT_IT_RABBIT_USER: payment_demo
+      PAYMENT_IT_RABBIT_PASSWORD: disposable-ci-rabbit-password
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+          cache-dependency-path: payment-service/pom.xml
+      - name: Verify payments with real databases and broker
+        run: mvn --batch-mode --no-transfer-progress -f payment-service/pom.xml verify
+
   frontend:
     name: Frontend lint and build
     runs-on: ubuntu-latest

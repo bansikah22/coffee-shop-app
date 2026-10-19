@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:payments;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ''
+  rabbitmq:
+    password: unused-test-password
+  task:
+    scheduling:
+      enabled: false
+app:
+  jwt-secret: test-only-shared-secret-at-least-32-bytes
+  stripe-key: sk_test_not_a_real_key
+  webhook-secret: whsec_test_only_not_a_real_secret
+  workers-enabled: false

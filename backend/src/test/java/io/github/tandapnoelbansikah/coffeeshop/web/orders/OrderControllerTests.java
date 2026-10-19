@@ -20,6 +20,9 @@ import io.github.tandapnoelbansikah.coffeeshop.domain.FulfillmentType;
 import io.github.tandapnoelbansikah.coffeeshop.domain.UserAccount;
 import io.github.tandapnoelbansikah.coffeeshop.repository.UserAccountRepository;
 import io.github.tandapnoelbansikah.coffeeshop.service.orders.OrderService;
+import io.github.tandapnoelbansikah.coffeeshop.service.orders.PaymentCheckoutClient;
+import io.github.tandapnoelbansikah.coffeeshop.service.orders.PaymentResultEvent;
+import io.github.tandapnoelbansikah.coffeeshop.service.orders.PaymentResultProcessor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +36,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @SpringBootTest(properties = { "app.order-confirmation.enabled=true", "management.health.mail.enabled=false",
+		"app.payment.enabled=true", "app.payment.client-secret=test-client-secret",
+		"app.payment.token-uri=https://keycloak.test/token",
 		"app.cors.allowed-origins=http://localhost:8088" })
 @AutoConfigureMockMvc
 class OrderControllerTests {
@@ -43,8 +48,12 @@ class OrderControllerTests {
 	private UserAccountRepository userAccountRepository;
 	@Autowired
 	private OrderService orderService;
+	@Autowired
+	private PaymentResultProcessor paymentResultProcessor;
 	@MockitoBean
 	private JavaMailSender mailSender;
+	@MockitoBean
+	private PaymentCheckoutClient paymentCheckoutClient;
 
 	private UserAccount customer;
 
@@ -52,6 +61,12 @@ class OrderControllerTests {
 	void createCustomer() {
 		customer = userAccountRepository.saveAndFlush(
 				new UserAccount("customer-" + java.util.UUID.randomUUID() + "@example.com", "hash", AccountRole.CUSTOMER));
+		org.mockito.Mockito.when(paymentCheckoutClient.start(any())).thenAnswer(invocation -> {
+			var order = invocation.getArgument(0, io.github.tandapnoelbansikah.coffeeshop.domain.CoffeeOrder.class);
+			return new PaymentCheckoutClient.Checkout(java.util.UUID.nameUUIDFromBytes(("payment-" + order.getId()).getBytes()).toString(),
+					order.getId().toString(), order.getTotalPrice().movePointRight(2).longValueExact(), "USD", "PENDING",
+					"https://checkout.stripe.com/c/pay/synthetic-test-session");
+		});
 	}
 
 	@Test
@@ -65,7 +80,12 @@ class OrderControllerTests {
 				.andExpect(jsonPath("$.totalPrice").value(6.00))
 				.andExpect(jsonPath("$.fulfillmentType").value("PICKUP"))
 				.andExpect(jsonPath("$.customerPhone").value("555-0100"))
+				.andExpect(jsonPath("$.status").value("AWAITING_PAYMENT"))
+				.andExpect(jsonPath("$.checkoutUrl").value("https://checkout.stripe.com/c/pay/synthetic-test-session"))
 				.andExpect(jsonPath("$.customerEmail").value(customer.getEmail()));
+		verify(mailSender, org.mockito.Mockito.never()).send(any(SimpleMailMessage.class));
+		var pending = orderService.listCustomerOrders(customer.getId()).getFirst();
+		markPaid(pending);
 		ArgumentCaptor<SimpleMailMessage> email = ArgumentCaptor.forClass(SimpleMailMessage.class);
 		verify(mailSender).send(email.capture());
 		org.assertj.core.api.Assertions.assertThat(email.getValue().getTo()).contains(customer.getEmail());
@@ -80,7 +100,8 @@ class OrderControllerTests {
 				.andExpect(jsonPath("$.length()").value(1))
 				.andExpect(jsonPath("$[0].customerEmail").value(customer.getEmail()))
 				.andExpect(jsonPath("$[0].fulfillmentType").value("PICKUP"))
-				.andExpect(jsonPath("$[0].customerPhone").value("555-0100"));
+				.andExpect(jsonPath("$[0].customerPhone").value("555-0100"))
+				.andExpect(jsonPath("$[0].status").value("PAID"));
 
 		UserAccount otherCustomer = userAccountRepository.saveAndFlush(
 				new UserAccount("other-" + java.util.UUID.randomUUID() + "@example.com", "hash", AccountRole.CUSTOMER));
@@ -97,11 +118,15 @@ class OrderControllerTests {
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.fulfillmentType").value("DELIVERY"))
 				.andExpect(jsonPath("$.customerPhone").value("+1 555-0100"))
-				.andExpect(jsonPath("$.deliveryAddress").value("12 Main Street, Central"));
+				.andExpect(jsonPath("$.deliveryAddress").value("12 Main Street, Central"))
+				.andExpect(jsonPath("$.status").value("AWAITING_PAYMENT"));
 
 		mockMvc.perform(get("/api/v1/orders").with(user(customer)))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$[0].deliveryAddress").value("12 Main Street, Central"));
+				.andExpect(jsonPath("$[0].deliveryAddress").value("12 Main Street, Central"))
+				.andExpect(jsonPath("$[0].status").value("AWAITING_PAYMENT"));
+		verify(mailSender, org.mockito.Mockito.never()).send(any(SimpleMailMessage.class));
+		markPaid(orderService.listCustomerOrders(customer.getId()).getFirst());
 
 		ArgumentCaptor<SimpleMailMessage> email = ArgumentCaptor.forClass(SimpleMailMessage.class);
 		verify(mailSender).send(email.capture());
@@ -132,11 +157,17 @@ class OrderControllerTests {
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("{\"coffeeId\":1,\"quantity\":1,\"fulfillmentType\":\"PICKUP\",\"customerPhone\":\"555-0100\"}"))
 				.andExpect(status().isCreated());
+		markPaid(orderService.listCustomerOrders(customer.getId()).getFirst());
+		mockMvc.perform(get("/api/v1/orders").with(user(customer)))
+				.andExpect(status().isOk()).andExpect(jsonPath("$[0].status").value("PAID"));
 	}
 
 	@Test
 	void markingOrderReadySendsOneReadyEmailAndRequiresAdmin() throws Exception {
 		var order = orderService.createOrder(1L, 1, FulfillmentType.PICKUP, "555-0100", null, customer);
+		String paymentId = java.util.UUID.randomUUID().toString();
+		orderService.attachPaymentAttempt(order.getId(), customer.getId(), paymentId);
+		paymentResultProcessor.apply(paymentEvent(order.getId(), paymentId, 300, "payment.succeeded", "SUCCEEDED"));
 		String readyPath = "/api/v1/admin/orders/" + order.getId() + "/ready";
 		mockMvc.perform(patch(readyPath).header("Origin", "http://localhost:8088").with(user(customer)).with(csrf()))
 				.andExpect(status().isForbidden());
@@ -164,5 +195,63 @@ class OrderControllerTests {
 				.header("Access-Control-Request-Headers", "X-CSRF-TOKEN"))
 				.andExpect(status().isOk())
 				.andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:8088"));
+	}
+
+	@Test
+	void checkoutRetryIsOwnedAndReusesTheSamePaymentAttempt() throws Exception {
+		var result = mockMvc.perform(post("/api/v1/orders").with(user(customer)).with(csrf())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"coffeeId\":1,\"quantity\":1,\"fulfillmentType\":\"PICKUP\",\"customerPhone\":\"555-0100\"}"))
+				.andExpect(status().isCreated()).andReturn();
+		Number rawOrderId = com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.id");
+		Long orderId = rawOrderId.longValue();
+		String paymentId = com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.paymentAttemptId");
+		mockMvc.perform(post("/api/v1/orders/{orderId}/checkout", orderId).with(user(customer)).with(csrf()))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.paymentAttemptId").value(paymentId));
+		UserAccount other = userAccountRepository.saveAndFlush(new UserAccount(
+				"other-" + java.util.UUID.randomUUID() + "@example.com", "hash", AccountRole.CUSTOMER));
+		mockMvc.perform(post("/api/v1/orders/{orderId}/checkout", orderId).with(user(other)).with(csrf()))
+				.andExpect(status().isNotFound());
+		org.mockito.Mockito.verify(paymentCheckoutClient, times(2)).start(any());
+	}
+
+	@Test
+	void mismatchedPaymentCannotMarkOrderPaidAndDuplicateSuccessSendsEmailOnce() {
+		var order = orderService.createOrder(1L, 1, FulfillmentType.PICKUP, "555-0100", null, customer);
+		String paymentId = java.util.UUID.randomUUID().toString();
+		orderService.attachPaymentAttempt(order.getId(), customer.getId(), paymentId);
+		var mismatch = paymentEvent(order.getId(), paymentId, 301, "payment.succeeded", "SUCCEEDED");
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> paymentResultProcessor.apply(mismatch))
+				.isInstanceOf(IllegalArgumentException.class);
+		org.assertj.core.api.Assertions.assertThat(orderService.listCustomerOrders(customer.getId()).getFirst().getStatus())
+				.isEqualTo(io.github.tandapnoelbansikah.coffeeshop.domain.OrderStatus.AWAITING_PAYMENT);
+		verify(mailSender, org.mockito.Mockito.never()).send(any(SimpleMailMessage.class));
+
+		var success = paymentEvent(order.getId(), paymentId, 300, "payment.succeeded", "SUCCEEDED");
+		org.assertj.core.api.Assertions.assertThat(paymentResultProcessor.apply(success)).isTrue();
+		org.assertj.core.api.Assertions.assertThat(paymentResultProcessor.apply(success)).isFalse();
+		org.assertj.core.api.Assertions.assertThat(orderService.listCustomerOrders(customer.getId()).getFirst().getStatus())
+				.isEqualTo(io.github.tandapnoelbansikah.coffeeshop.domain.OrderStatus.PAID);
+		verify(mailSender, times(1)).send(any(SimpleMailMessage.class));
+	}
+
+	@Test
+	void awaitingPaymentOrderCannotBePreparedByAdministrator() throws Exception {
+		var order = orderService.createOrder(1L, 1, FulfillmentType.PICKUP, "555-0100", null, customer);
+		mockMvc.perform(patch("/api/v1/admin/orders/{id}/ready", order.getId()).with(user("admin").roles("ADMIN")).with(csrf()))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.status").value("AWAITING_PAYMENT"));
+		org.assertj.core.api.Assertions.assertThat(orderService.listCustomerOrders(customer.getId()).getFirst().getStatus())
+				.isEqualTo(io.github.tandapnoelbansikah.coffeeshop.domain.OrderStatus.AWAITING_PAYMENT);
+		verify(mailSender, org.mockito.Mockito.never()).send(any(SimpleMailMessage.class));
+	}
+
+	private void markPaid(io.github.tandapnoelbansikah.coffeeshop.domain.CoffeeOrder order) {
+		paymentResultProcessor.apply(paymentEvent(order.getId(), order.getPaymentAttemptId(),
+				order.getTotalPrice().movePointRight(2).longValueExact(), "payment.succeeded", "SUCCEEDED"));
+	}
+
+	private PaymentResultEvent paymentEvent(Long orderId, String paymentId, long amountMinor, String eventType, String status) {
+		return new PaymentResultEvent(1, java.util.UUID.randomUUID().toString(), eventType, paymentId,
+				orderId.toString(), amountMinor, "USD", status);
 	}
 }

@@ -57,7 +57,10 @@ public class CoffeeOrder {
 
 	@Enumerated(EnumType.STRING)
 	@Column(name = "order_status", nullable = false, length = 20)
-	private OrderStatus status = OrderStatus.PLACED;
+	private OrderStatus status = OrderStatus.AWAITING_PAYMENT;
+
+	@Column(name = "payment_attempt_id", length = 36, unique = true)
+	private String paymentAttemptId;
 
 	protected CoffeeOrder() {
 	}
@@ -88,9 +91,45 @@ public class CoffeeOrder {
 	public FulfillmentType getFulfillmentType() { return fulfillmentType; }
 	public String getCustomerPhone() { return customerPhone; }
 	public String getDeliveryAddress() { return deliveryAddress; }
+	public String getPaymentAttemptId() { return paymentAttemptId; }
+
+	public void attachPaymentAttempt(String attemptId) {
+		if (status != OrderStatus.AWAITING_PAYMENT || attemptId == null || attemptId.isBlank()) {
+			throw new IllegalStateException("Only an unpaid order can receive a payment attempt");
+		}
+		if (paymentAttemptId != null && !paymentAttemptId.equals(attemptId)) {
+			throw new IllegalStateException("An order cannot switch payment attempts");
+		}
+		paymentAttemptId = attemptId;
+	}
+
+	public boolean markPaymentSucceeded(String attemptId, long amountMinor, String currency) {
+		verifyPaymentSnapshot(attemptId, amountMinor, currency);
+		if (status == OrderStatus.PAID || status == OrderStatus.READY || status == OrderStatus.OUT_FOR_DELIVERY
+				|| status == OrderStatus.COMPLETED) {
+			return false;
+		}
+		if (status != OrderStatus.AWAITING_PAYMENT) {
+			throw new IllegalStateException("Payment success cannot be applied to this order state");
+		}
+		status = OrderStatus.PAID;
+		return true;
+	}
+
+	public boolean markPaymentExpired(String attemptId, long amountMinor, String currency) {
+		verifyPaymentSnapshot(attemptId, amountMinor, currency);
+		if (status == OrderStatus.PAYMENT_EXPIRED) {
+			return false;
+		}
+		if (status != OrderStatus.AWAITING_PAYMENT) {
+			return false;
+		}
+		status = OrderStatus.PAYMENT_EXPIRED;
+		return true;
+	}
 
 	public boolean markReadyForFulfillment() {
-		if (status != OrderStatus.PLACED) {
+		if (status != OrderStatus.PAID) {
 			return false;
 		}
 		status = fulfillmentType == FulfillmentType.DELIVERY ? OrderStatus.OUT_FOR_DELIVERY : OrderStatus.READY;
@@ -103,5 +142,13 @@ public class CoffeeOrder {
 		}
 		status = OrderStatus.COMPLETED;
 		return true;
+	}
+
+	private void verifyPaymentSnapshot(String attemptId, long amountMinor, String currency) {
+		long expectedAmountMinor = totalPrice.movePointRight(2).longValueExact();
+		if (paymentAttemptId == null || !paymentAttemptId.equals(attemptId) || amountMinor != expectedAmountMinor
+				|| !"USD".equals(currency)) {
+			throw new IllegalArgumentException("Payment result does not match the persisted order snapshot");
+		}
 	}
 }

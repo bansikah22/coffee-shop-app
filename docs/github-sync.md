@@ -34,13 +34,13 @@ After a successful job, compare the GitHub default-branch commit SHA with the se
 
 ## GitHub Verification Workflow
 
-The repository includes `.github/workflows/verify.yml`, which runs on pushes to `main`, pull requests targeting `main`, and manual dispatch. It verifies the frontend with Node.js 26 (`npm ci`, lint, and production build) and the backend with Java 25 and the Maven wrapper (`clean verify`, including tests and packaging). The payment service is still documentation and placeholders, so it has no build job yet.
+The repository includes `.github/workflows/verify.yml`, with push/PR branches defined in that file and manual dispatch available. It verifies the frontend with Node.js 26 (`npm ci`, lint, and production build) and the backend with Java 25 and the Maven wrapper (`clean verify`, including tests and packaging). Payments runs `mvn verify` with real PostgreSQL/RabbitMQ CI services and a mocked Stripe boundary. No real Stripe credentials or live charges are needed. The GitLab payment job runs the fast H2/mock suite; real-infrastructure tests are explicitly opt-in locally and enabled in the GitHub payment job.
 
 GitHub Actions must be enabled for the repository under **Settings > Actions > General**, with the referenced GitHub-maintained actions allowed. After the workflow reaches the default branch, open **Actions > Verify > Run workflow** to start it manually. Normal sync pushes authenticated by the personal access token also trigger it automatically. The workflow itself uses only `contents: read`; it does not use `GITHUB_SYNC_TOKEN`, publish images, or deploy anything.
 
 ## Dependabot
 
-`.github/dependabot.yml` schedules weekly Monday checks in the `Africa/Douala` timezone for backend Maven dependencies, frontend npm dependencies, both Dockerfiles, and GitHub Actions. No payment-service manifest exists yet, so there is nothing to check there. Docker Compose service image tags are not covered by the Dockerfile entries and still need separate review.
+`.github/dependabot.yml` schedules weekly Monday checks in the `Africa/Douala` timezone for backend/payment Maven dependencies, frontend npm dependencies, all three Dockerfiles, and GitHub Actions. Docker Compose service image tags are not covered by the Dockerfile entries and still need separate review.
 
 After synchronization, check GitHub **Settings > Advanced Security** (or **Code security**, depending on the interface) and enable Dependabot alerts and Dependabot security updates where available. The configuration schedules version updates; it does not itself enable those repository security settings. No auto-merge is configured, and the verification workflow needs no secrets to test Dependabot pull requests.
 

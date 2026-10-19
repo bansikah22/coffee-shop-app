@@ -1,0 +1,13 @@
+CREATE TABLE processed_events (
+    event_id VARCHAR(36) PRIMARY KEY,
+    fingerprint VARCHAR(64) NOT NULL,
+    processed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE demo_orders (
+    order_reference VARCHAR(100) PRIMARY KEY,
+    payment_id VARCHAR(36) NOT NULL,
+    amount_minor BIGINT NOT NULL,
+    currency VARCHAR(3) NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

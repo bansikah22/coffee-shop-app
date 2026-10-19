@@ -3,6 +3,7 @@ package io.github.tandapnoelbansikah.coffeeshop.configuration.auth;
 import io.github.tandapnoelbansikah.coffeeshop.repository.UserAccountRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import static org.springframework.security.config.Customizer.withDefaults;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.context.annotation.Configuration;
@@ -48,7 +49,8 @@ public class SecurityConfiguration {
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http, SecurityContextRepository contextRepository,
 			ObjectProvider<KeycloakConfiguration> keycloak,
-			ObjectProvider<ClientRegistrationRepository> registrations) throws Exception {
+			@Qualifier("clientRegistrationRepository") ObjectProvider<ClientRegistrationRepository> registrations)
+				throws Exception {
 		if (keycloak.getIfAvailable() != null) {
 			keycloak.getObject().configure(http, registrations.getObject());
 		}

@@ -1,0 +1,48 @@
+server:
+  port: ${PAYMENT_PORT:18081}
+  max-http-request-header-size: 16KB
+  error:
+    include-message: never
+spring:
+  application:
+    name: payment-poc
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:15433/payments}
+    username: ${DATABASE_USER:payments}
+    password: ${DATABASE_PASSWORD}
+  flyway:
+    locations: classpath:db/${APP_ROLE:payments}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:15673}
+    username: ${RABBITMQ_USER:payments}
+    password: ${RABBITMQ_PASSWORD}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 1
+        default-requeue-rejected: false
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+app:
+  role: ${APP_ROLE:payments}
+  jwt-secret: ${PAYMENT_JWT_SECRET:}
+  issuer-uri: ${PAYMENT_ISSUER_URI:}
+  jwks-uri: ${PAYMENT_JWK_SET_URI:}
+  stripe-key: ${STRIPE_SECRET_KEY:}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+  public-url: ${PAYMENT_PUBLIC_URL:http://localhost:18081}
+  success-url: ${PAYMENT_SUCCESS_URL:http://localhost:8088/orders?payment=return}
+  cancel-url: ${PAYMENT_CANCEL_URL:http://localhost:8088/orders?payment=cancel}
+  workers-enabled: true
+  worker-delay: 10000

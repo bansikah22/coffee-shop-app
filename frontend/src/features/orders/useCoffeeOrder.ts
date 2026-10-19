@@ -10,6 +10,7 @@ export function useCoffeeOrder(coffees: Coffee[], ordersPath: string | null, set
   const [selectedCoffeeId, setSelectedCoffeeId] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
+  const [payingOrderId, setPayingOrderId] = useState<number | null>(null)
   const [markingOrderReady, setMarkingOrderReady] = useState<number | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
   const selectedCoffee = coffees.find((coffee) => coffee.id === selectedCoffeeId)
@@ -43,20 +44,38 @@ export function useCoffeeOrder(coffees: Coffee[], ordersPath: string | null, set
     setError('')
     setSuccessMessage('')
     try {
-      const order = await request<{ id: number; coffeeName: string; quantity: number; totalPrice: number }>('/orders', {
+      const order = await request<Order>('/orders', {
         method: 'POST', body: JSON.stringify({ coffeeId: selectedCoffeeId, quantity, fulfillmentType, customerPhone, deliveryAddress: fulfillmentType === 'DELIVERY' ? deliveryAddress : null }),
       })
-      setSuccessMessage(`${order.coffeeName} order #${order.id} placed successfully.`)
-      setStatus(`Order placed: ${order.quantity} ${order.coffeeName} for $${order.totalPrice.toFixed(2)}`)
+      setStatus(`Order #${order.id} created; payment is required before preparation.`)
       setSelectedCoffeeId(null)
       setQuantity(1)
       setFulfillmentType('PICKUP')
       setDeliveryAddress('')
+      if (order.checkoutUrl) {
+        window.location.assign(order.checkoutUrl)
+        return
+      }
+      setSuccessMessage(`Order #${order.id} is saved and awaiting payment. Open Your orders to retry checkout.`)
       await loadOrders()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Could not place this order.')
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  async function payOrder(orderId: number) {
+    setPayingOrderId(orderId)
+    setError('')
+    try {
+      const order = await request<Order>(`/orders/${orderId}/checkout`, { method: 'POST' })
+      if (!order.checkoutUrl) throw new Error('Checkout is not ready. Refresh your orders and retry shortly.')
+      window.location.assign(order.checkoutUrl)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Could not start payment for this order.')
+    } finally {
+      setPayingOrderId(null)
     }
   }
 
@@ -91,7 +110,7 @@ export function useCoffeeOrder(coffees: Coffee[], ordersPath: string | null, set
   return { quantity, setQuantity, fulfillmentType, setFulfillmentType, customerPhone, setCustomerPhone,
     deliveryAddress, setDeliveryAddress, selectedCoffeeId, setSelectedCoffeeId, selectedCoffee,
     isSubmitting, placeOrder, orders, loadOrders, markingOrderReady, markOrderReady, markOrderCompleted,
-    successMessage, dismissSuccessMessage: () => setSuccessMessage('') }
+    payingOrderId, payOrder, successMessage, dismissSuccessMessage: () => setSuccessMessage('') }
 }
 
 export type FulfillmentType = 'PICKUP' | 'DELIVERY'
@@ -103,8 +122,10 @@ export type Order = {
   totalPrice: number
   createdAt: string
   customerEmail: string | null
-  status: 'PLACED' | 'READY' | 'OUT_FOR_DELIVERY' | 'COMPLETED'
+  status: 'AWAITING_PAYMENT' | 'PAID' | 'PAYMENT_EXPIRED' | 'READY' | 'OUT_FOR_DELIVERY' | 'COMPLETED'
   fulfillmentType: FulfillmentType
   customerPhone: string
   deliveryAddress: string | null
+  paymentAttemptId: string | null
+  checkoutUrl: string | null
 }

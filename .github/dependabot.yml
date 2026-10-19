@@ -1,6 +1,14 @@
 version: 2
 updates:
   - package-ecosystem: maven
+    directory: /payment-service
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Africa/Douala
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: maven
     directory: /backend
     schedule:
       interval: weekly
@@ -20,6 +28,7 @@ updates:
     directories:
       - /backend
       - /frontend
+      - /payment-service
     schedule:
       interval: weekly
       day: monday

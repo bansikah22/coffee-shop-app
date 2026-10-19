@@ -31,6 +31,15 @@ services:
       KEYCLOAK_INTERNAL_ISSUER: ${KEYCLOAK_INTERNAL_ISSUER:-http://keycloak:8080/realms/coffee-shop}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-coffee-shop}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+      PAYMENTS_ENABLED: ${PAYMENTS_ENABLED:-false}
+      PAYMENT_BASE_URL: ${PAYMENT_BASE_URL:-http://payments:18081}
+      PAYMENT_TOKEN_URI: ${PAYMENT_TOKEN_URI:-http://keycloak:8080/realms/coffee-shop/protocol/openid-connect/token}
+      PAYMENT_CLIENT_ID: ${PAYMENT_CLIENT_ID:-payment-service}
+      PAYMENT_CLIENT_SECRET: ${PAYMENT_CLIENT_SECRET:-}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-payment_demo}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-}
       ORDER_CONFIRMATION_EMAIL_ENABLED: ${ORDER_CONFIRMATION_EMAIL_ENABLED:-false}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
       SMTP_PORT: ${SMTP_PORT:-1025}
@@ -103,6 +112,111 @@ services:
       - ./.local/keycloak:/opt/keycloak/data/import:ro
       - ./keycloak/themes:/opt/keycloak/themes:ro
 
+  payments-db:
+    image: postgres:18-alpine
+    profiles: [payments, payments-infra]
+    environment:
+      POSTGRES_DB: payments
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: ${PAYMENT_DB_PASSWORD:-}
+    ports:
+      - '127.0.0.1:15433:5432'
+    volumes:
+      - payments-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U payments -d payments']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  demo-db:
+    image: postgres:18-alpine
+    profiles: [payments, payments-infra]
+    environment:
+      POSTGRES_DB: demo_orders
+      POSTGRES_USER: demo_orders
+      POSTGRES_PASSWORD: ${DEMO_DB_PASSWORD:-}
+    ports:
+      - '127.0.0.1:15434:5432'
+    volumes:
+      - demo-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U demo_orders -d demo_orders']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  rabbitmq:
+    image: rabbitmq:4.2-management
+    profiles: [payments, payments-infra]
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-payment_demo}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-}
+    ports:
+      - '127.0.0.1:15673:5672'
+      - '127.0.0.1:15674:15672'
+    volumes:
+      - rabbit-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  payments:
+    profiles: [payments]
+    build:
+      context: ./payment-service
+    environment:
+      APP_ROLE: payments
+      DATABASE_URL: jdbc:postgresql://payments-db:5432/payments
+      DATABASE_USER: payments
+      DATABASE_PASSWORD: ${PAYMENT_DB_PASSWORD:-}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-payment_demo}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-}
+      PAYMENT_JWT_SECRET: ${PAYMENT_JWT_SECRET:-}
+      PAYMENT_ISSUER_URI: ${PAYMENT_ISSUER_URI:-}
+      PAYMENT_JWK_SET_URI: ${PAYMENT_JWK_SET_URI:-}
+      PAYMENT_SUCCESS_URL: ${PAYMENT_SUCCESS_URL:-http://localhost:8088/orders?payment=return}
+      PAYMENT_CANCEL_URL: ${PAYMENT_CANCEL_URL:-http://localhost:8088/orders?payment=cancel}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      PAYMENT_PUBLIC_URL: ${PAYMENT_PUBLIC_URL:-http://localhost:18081}
+    ports:
+      - '127.0.0.1:18081:18081'
+    depends_on:
+      payments-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  demo-consumer:
+    profiles: [payments]
+    build:
+      context: ./payment-service
+    environment:
+      APP_ROLE: consumer
+      DATABASE_URL: jdbc:postgresql://demo-db:5432/demo_orders
+      DATABASE_USER: demo_orders
+      DATABASE_PASSWORD: ${DEMO_DB_PASSWORD:-}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-payment_demo}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-}
+      PAYMENT_JWT_SECRET: ${PAYMENT_JWT_SECRET:-}
+    ports:
+      - '127.0.0.1:18082:18081'
+    depends_on:
+      demo-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   keycloak-postgres-data:
+  payments-data:
+  demo-data:
+  rabbit-data:

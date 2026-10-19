@@ -47,6 +47,23 @@ github:sync:
       when: manual
       allow_failure: true
 
+payments:verify:
+  stage: verify
+  image: maven:3.9.12-eclipse-temurin-25
+  cache:
+    key:
+      files:
+        - payment-service/pom.xml
+    paths:
+      - .m2/repository/
+  script:
+    - mvn --batch-mode --no-transfer-progress -f payment-service/pom.xml verify
+  rules:
+    - changes:
+        - payment-service/**/*
+        - docker-compose.yml
+        - .gitlab-ci.yml
+
 frontend:verify:
   stage: verify
   image: node:26-alpine
