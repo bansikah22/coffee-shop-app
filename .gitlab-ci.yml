@@ -23,6 +23,15 @@ variables:
 default:
   interruptible: true
 
+.maven-build:
+  image: maven:3.9.12-eclipse-temurin-25
+  cache:
+    key:
+      files:
+        - $MAVEN_PROJECT_DIR/pom.xml
+    paths:
+      - .m2/repository/
+
 github:sync:
   stage: sync
   image: alpine:3.22
@@ -49,14 +58,10 @@ github:sync:
       allow_failure: true
 
 payments:verify:
+  extends: .maven-build
   stage: verify
-  image: maven:3.9.12-eclipse-temurin-25
-  cache:
-    key:
-      files:
-        - payment-service/pom.xml
-    paths:
-      - .m2/repository/
+  variables:
+    MAVEN_PROJECT_DIR: payment-service
   script:
     - mvn --batch-mode --no-transfer-progress -f payment-service/pom.xml verify
   rules:
@@ -66,16 +71,12 @@ payments:verify:
         - .gitlab-ci.yml
 
 payments:package:
+  extends: .maven-build
   stage: package
-  image: maven:3.9.12-eclipse-temurin-25
+  variables:
+    MAVEN_PROJECT_DIR: payment-service
   needs:
     - payments:verify
-  cache:
-    key:
-      files:
-        - payment-service/pom.xml
-    paths:
-      - .m2/repository/
   script:
     - mvn --batch-mode --no-transfer-progress -f payment-service/pom.xml package -DskipTests
   artifacts:
@@ -108,14 +109,10 @@ frontend:verify:
         - .gitlab-ci.yml
 
 backend:test:
+  extends: .maven-build
   stage: verify
-  image: maven:3.9.12-eclipse-temurin-25
-  cache:
-    key:
-      files:
-        - backend/pom.xml
-    paths:
-      - .m2/repository/
+  variables:
+    MAVEN_PROJECT_DIR: backend
   script:
     - cd backend
     - mvn --batch-mode --no-transfer-progress test
@@ -125,16 +122,12 @@ backend:test:
         - .gitlab-ci.yml
 
 backend:package:
+  extends: .maven-build
   stage: package
-  image: maven:3.9.12-eclipse-temurin-25
+  variables:
+    MAVEN_PROJECT_DIR: backend
   needs:
     - backend:test
-  cache:
-    key:
-      files:
-        - backend/pom.xml
-    paths:
-      - .m2/repository/
   script:
     - cd backend
     - mvn --batch-mode --no-transfer-progress package -DskipTests

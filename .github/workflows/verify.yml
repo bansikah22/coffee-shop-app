@@ -56,15 +56,13 @@ jobs:
       PAYMENT_IT_RABBIT_USER: payment_demo
       PAYMENT_IT_RABBIT_PASSWORD: disposable-ci-rabbit-password
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-java@v4
+      - name: Set up Java
+        uses: ./.github/actions/setup-java
         with:
-          distribution: temurin
-          java-version: '25'
-          cache: maven
-          cache-dependency-path: payment-service/pom.xml
+          pom-file: payment-service/pom.xml
       - name: Verify payments with real databases and broker
         run: mvn --batch-mode --no-transfer-progress -f payment-service/pom.xml verify
 
@@ -106,11 +104,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Java
-        uses: actions/setup-java@v6
+        uses: ./.github/actions/setup-java
         with:
-          distribution: temurin
-          java-version: '25'
-          cache: maven
-          cache-dependency-path: backend/pom.xml
+          pom-file: backend/pom.xml
       - name: Compile, test, and package
         run: ./mvnw --batch-mode --no-transfer-progress clean verify
