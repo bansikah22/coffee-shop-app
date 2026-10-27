@@ -4,7 +4,7 @@ Coffee Shop is a React and Spring Boot app for browsing coffee, ordering, and tr
 
 ## Demo
 
-Watch the [Coffee Shop demo video](docs/demo-video.mov) (QuickTime, 128 MB).
+Watch on Youtube here [Coffee Shop demo video](https://www.youtube.com/watch?v=JTQF1X2sO_4)
 
 ## Architecture
 
