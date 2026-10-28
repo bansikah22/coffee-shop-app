@@ -13,7 +13,7 @@
   <version>0.0.1-SNAPSHOT</version>
   <properties>
     <java.version>25</java.version>
-    <stripe.version>33.0.0</stripe.version>
+    <stripe.version>34.0.0</stripe.version>
   </properties>
   <dependencies>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-webmvc</artifactId></dependency>
